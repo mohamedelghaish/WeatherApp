@@ -59,7 +59,10 @@ class ViewController: UIViewController {
         viewModel.$forecastItems
             .sink { [weak self] items in
                 self?.forecastItems = items
-                self?.forecastCollectionView.reloadData()
+                DispatchQueue.main.async {
+                    self?.forecastCollectionView.reloadData()
+                }
+                
             }.store(in: &cancellables)
         
         viewModel.$cityName
