@@ -25,3 +25,9 @@ struct ForecastResponse: Decodable {
         }
     }
 }
+
+struct ForecastItem {
+    let dateText: String
+    let temp: String
+    let iconURL: URL?
+}

@@ -7,7 +7,8 @@
 
 import Combine
 import Foundation
-
+import CoreData
+import Network
 class WeatherViewModel {
     @Published var temperature: String = ""
     @Published var description: String = ""
@@ -17,11 +18,7 @@ class WeatherViewModel {
     @Published var currentDate: String = ""
 
 
-    struct ForecastItem {
-        let dateText: String
-        let temp: String
-        let iconURL: URL?
-    }
+    
 
     private let weatherService = WeatherService()
     private let locationManager = LocationManager()
@@ -52,17 +49,22 @@ class WeatherViewModel {
         locationManager.requestLocation()
     }
 
+    
     private func fetchWeather(lat: Double, lon: Double) {
-        weatherService.fetchWeather(lat: lat, lon: lon)
-            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] response in
-                self?.updateCurrentWeather(response)
-            }).store(in: &cancellables)
+        let weatherPublisher = weatherService.fetchWeather(lat: lat, lon: lon)
+        let forecastPublisher = weatherService.fetchForecast(lat: lat, lon: lon)
 
-        weatherService.fetchForecast(lat: lat, lon: lon)
-            .sink(receiveCompletion: { _ in }, receiveValue: { [weak self] response in
-                self?.forecastItems = self?.parseForecast(response) ?? []
-            }).store(in: &cancellables)
+        Publishers.Zip(weatherPublisher, forecastPublisher)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { _ in },
+                  receiveValue: { [weak self] weather, forecast in
+                self?.updateCurrentWeather(weather)
+                self?.forecastItems = self?.parseForecast(forecast) ?? []
+                self?.cacheWeather(weather, forecast: forecast)
+            })
+            .store(in: &cancellables)
     }
+
 
 
     func updateCurrentWeather(_ response: WeatherResponse) {
@@ -101,6 +103,70 @@ class WeatherViewModel {
                 iconURL: URL(string: "https://openweathermap.org/img/wn/\(icon)@2x.png")
             )
         }
+    }
+    
+    func cacheWeather(_ response: WeatherResponse, forecast: ForecastResponse) {
+        let context = CoreDataManager.shared.context
+
+        // Remove old cache
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = NSFetchRequest(entityName: "CachedWeather")
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        try? context.execute(deleteRequest)
+        
+        let fetchRequest2: NSFetchRequest<NSFetchRequestResult> = NSFetchRequest(entityName: "CachedForecast")
+        let deleteRequest2 = NSBatchDeleteRequest(fetchRequest: fetchRequest2)
+        try? context.execute(deleteRequest2)
+
+        // Save new weather
+        let weatherEntity = CachedWeather(context: context)
+        weatherEntity.cityName = response.name
+        weatherEntity.temperature = response.main.temp
+        weatherEntity.condition = response.weather.first?.description ?? ""
+        weatherEntity.date = Date()
+
+        // Save forecast
+        for item in forecast.list.prefix(5) {
+            let forecastEntity = CachedForecast(context: context)
+            forecastEntity.cityName = response.name
+            forecastEntity.temperature = item.main.temp
+            forecastEntity.icon = item.weather.first?.icon ?? ""
+            forecastEntity.date = Date(timeIntervalSince1970: item.dt)
+        }
+
+        CoreDataManager.shared.saveContext()
+    }
+    
+    func loadCachedWeather() -> (weather: CachedWeather?, forecasts: [CachedForecast]) {
+        let context = CoreDataManager.shared.context
+
+        let weatherRequest: NSFetchRequest<CachedWeather> = CachedWeather.fetchRequest()
+        weatherRequest.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
+        let weather = try? context.fetch(weatherRequest).first
+
+        let forecastRequest: NSFetchRequest<CachedForecast> = CachedForecast.fetchRequest()
+        forecastRequest.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
+        let forecasts = (try? context.fetch(forecastRequest)) ?? []
+
+        return (weather, forecasts)
+    }
+
+    
+
+    func isConnectedToNetwork() -> Bool {
+        let monitor = NWPathMonitor()
+        let semaphore = DispatchSemaphore(value: 0)
+        var isConnected = false
+
+        monitor.pathUpdateHandler = { path in
+            isConnected = path.status == .satisfied
+            semaphore.signal()
+            monitor.cancel()
+        }
+
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        monitor.start(queue: queue)
+        semaphore.wait()
+        return isConnected
     }
 
 }

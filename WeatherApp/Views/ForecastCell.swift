@@ -12,7 +12,7 @@ class ForecastCell: UICollectionViewCell {
     @IBOutlet weak var dayLabel: UILabel!
     @IBOutlet weak var tempLabel: UILabel!
 
-    func configure(with item: WeatherViewModel.ForecastItem) {
+    func configure(with item: ForecastItem) {
         dayLabel.text = item.dateText
         tempLabel.text = item.temp
         if let url = item.iconURL {

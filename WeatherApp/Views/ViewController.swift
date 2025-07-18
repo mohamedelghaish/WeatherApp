@@ -19,7 +19,7 @@ class ViewController: UIViewController {
 
     private let viewModel = WeatherViewModel()
     private var cancellables = Set<AnyCancellable>()
-    private var forecastItems: [WeatherViewModel.ForecastItem] = []
+    private var forecastItems: [ForecastItem] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -27,8 +27,19 @@ class ViewController: UIViewController {
         registerForecastCell()
         setupCollectionView()
         viewModel.fetchWeatherForCurrentLocation()
+        if !viewModel.isConnectedToNetwork() {
+            loadOfflineWeatherIfAvailable()
+        }
+        
     }
-   
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+
+        DispatchQueue.main.async {
+            self.forecastCollectionView.collectionViewLayout.invalidateLayout()
+            self.forecastCollectionView.reloadData()
+        }
+    }
 
     private func registerForecastCell() {
         let nib = UINib(nibName: "ForecastCell", bundle: nil)
@@ -79,7 +90,46 @@ class ViewController: UIViewController {
         forecastCollectionView.dataSource = self
         forecastCollectionView.delegate = self
     }
-
+    func loadOfflineWeatherIfAvailable() {
+        let cached = viewModel.loadCachedWeather()
+        
+        if let weather = cached.weather {
+            cityLabel.text = weather.cityName
+            tempLabel.text = "\(Int(weather.temperature))°"
+            descLabel.text = weather.condition
+            
+            
+            let formatter = DateFormatter()
+            formatter.locale = Locale.current
+            formatter.dateFormat = "EEEE, MMM d"
+            if let date = weather.date {
+                dateLabel.text = formatter.string(from: date)
+            }
+        }
+        
+        self.forecastItems = cached.forecasts.enumerated().compactMap { index, forecast in
+            guard let originalDate = forecast.date,
+                  let icon = forecast.icon else { return nil }
+            
+            let adjustedDate = Calendar.current.date(byAdding: .day, value: index, to: originalDate) ?? originalDate
+            
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "EEE"
+            
+            let dateText = formatter.string(from: adjustedDate)
+            let temp = String(Int(forecast.temperature)) + "°"
+            let iconURL = URL(string: "https://openweathermap.org/img/wn/\(icon)@2x.png")
+            
+            return ForecastItem(dateText: dateText, temp: temp, iconURL: iconURL)
+        }
+        DispatchQueue.main.async {
+            self.forecastCollectionView.reloadData()
+        }
+        
+    }
+        
     @IBAction func searchButtonTapped(_ sender: UIButton) {
         guard let city = cityTextField.text, !city.isEmpty else { return }
         viewModel.fetchWeather(for: city)
