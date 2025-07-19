@@ -72,6 +72,7 @@ class ViewController: UIViewController {
                 self?.forecastItems = items
                 DispatchQueue.main.async {
                     self?.forecastCollectionView.reloadData()
+                    self?.forecastCollectionView.collectionViewLayout.invalidateLayout()
                 }
                 
             }.store(in: &cancellables)
@@ -124,9 +125,11 @@ class ViewController: UIViewController {
             
             return ForecastItem(dateText: dateText, temp: temp, iconURL: iconURL)
         }
-        DispatchQueue.main.async {
-            self.forecastCollectionView.reloadData()
-        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.forecastCollectionView.reloadData()
+                self.forecastCollectionView.collectionViewLayout.invalidateLayout()
+            }
         
     }
         
